@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { categorizeTransaction } from './categorize'
 import { computeGoalProgress } from './goals'
-import { parseStatementCsv } from './parseCsv'
+import { dominantMonth, normalizeDate, parseAmount, parseStatementCsv } from './parseCsv'
 import { computeBalanceSheet } from './balance'
 import type { Transaction } from './types'
 
@@ -13,7 +13,7 @@ describe('categorizeTransaction', () => {
 
   it('marca bitso y actinver como ahorro', () => {
     expect(categorizeTransaction('TRANSFERENCIA A BITSO', -5000)).toBe('ahorro')
-    expect(categorizeTransaction('ACTINVER TRADE DEPOSITO', -8000)).toBe('ahorro')
+    expect(categorizeTransaction('SPEI ENVIADO ACTINVER TRADE', -8000)).toBe('ahorro')
   })
 
   it('marca renta y cfe como costo de vida', () => {
@@ -23,6 +23,20 @@ describe('categorizeTransaction', () => {
 
   it('marca nomina positiva como ingreso', () => {
     expect(categorizeTransaction('NOMINA EMPRESA', 45000)).toBe('ingreso')
+  })
+})
+
+describe('parseAmount y fechas MX', () => {
+  it('parsea montos US y MX', () => {
+    expect(parseAmount('1,850.40')).toBeCloseTo(1850.4)
+    expect(parseAmount('1.850,40')).toBeCloseTo(1850.4)
+    expect(parseAmount('($299.00)')).toBeCloseTo(-299)
+    expect(parseAmount('-1,240.00')).toBeCloseTo(-1240)
+  })
+
+  it('normaliza fechas DD/MM/YYYY', () => {
+    expect(normalizeDate('01/03/2026')).toBe('2026-03-01')
+    expect(normalizeDate('2026-03-15')).toBe('2026-03-15')
   })
 })
 
@@ -67,7 +81,7 @@ describe('computeGoalProgress', () => {
 })
 
 describe('parseStatementCsv', () => {
-  it('parsea CSV de muestra y categoriza', () => {
+  it('parsea CSV simple y categoriza', () => {
     const csv = `fecha,descripcion,monto,cuenta
 2026-03-02,NETFLIX.COM,-299.00,Santander
 2026-03-04,TRANSFERENCIA A BITSO,-5000.00,Santander
@@ -78,6 +92,33 @@ describe('parseStatementCsv', () => {
     expect(transactions[0].category).toBe('diversion')
     expect(transactions[1].category).toBe('ahorro')
     expect(transactions[2].category).toBe('ingreso')
+  })
+
+  it('parsea formato Santander Cargo/Abono con fechas MX', () => {
+    const csv = `Fecha,Concepto,Cargo,Abono,Cuenta
+01/03/2026,NETFLIX.COM,299.00,,Santander
+15/03/2026,NOMINA EMPRESA,,"45,000.00",Santander
+04/03/2026,SPEI ENVIADO BITSO,"5,000.00",,Santander`
+    const { transactions, errors, detectedFormat } = parseStatementCsv(csv)
+    expect(errors).toHaveLength(0)
+    expect(detectedFormat).toBe('cargo_abono')
+    expect(transactions).toHaveLength(3)
+    expect(transactions[0]).toMatchObject({
+      date: '2026-03-01',
+      amount: -299,
+      category: 'diversion',
+    })
+    expect(transactions[1]).toMatchObject({
+      date: '2026-03-15',
+      amount: 45000,
+      category: 'ingreso',
+    })
+    expect(transactions[2]).toMatchObject({
+      date: '2026-03-04',
+      amount: -5000,
+      category: 'ahorro',
+    })
+    expect(dominantMonth(transactions)).toBe('2026-03')
   })
 })
 

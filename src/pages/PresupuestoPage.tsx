@@ -7,16 +7,25 @@ import {
   type Transaction,
 } from '../lib/types'
 import { computeGoalProgress, currentYearMonth, formatMxn, formatPct } from '../lib/goals'
-import { parseStatementCsv } from '../lib/parseCsv'
+import { dominantMonth, parseStatementCsv } from '../lib/parseCsv'
 import { loadTransactions, saveTransactions } from '../lib/storage'
 
 const BUDGET_CATEGORIES: Category[] = ['costo_vida', 'diversion', 'ahorro', 'ingreso', 'ignorar']
+
+type SampleId = 'mixto' | 'santander' | 'mercado_pago'
+
+const SAMPLES: Record<SampleId, { file: string; label: string }> = {
+  mixto: { file: '/sample-estado-cuenta.csv', label: 'Mes mixto' },
+  santander: { file: '/sample-santander.csv', label: 'Santander (Cargo/Abono)' },
+  mercado_pago: { file: '/sample-mercado-pago.csv', label: 'Mercado Pago' },
+}
 
 export function PresupuestoPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [month, setMonth] = useState(currentYearMonth())
   const [dragOver, setDragOver] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  const [replaceOnImport, setReplaceOnImport] = useState(false)
   const [manual, setManual] = useState({
     date: `${currentYearMonth()}-01`,
     description: '',
@@ -39,15 +48,34 @@ export function PresupuestoPage() {
 
   const progress = useMemo(() => computeGoalProgress(monthTx), [monthTx])
 
-  async function ingestFile(file: File) {
-    const text = await file.text()
-    const { transactions: parsed, errors } = parseStatementCsv(text)
+  function applyImport(parsed: Transaction[], label: string, errors: string[], format?: string) {
     if (parsed.length === 0) {
       setMessage(errors[0] ?? 'No se encontraron transacciones en el archivo.')
       return
     }
-    setTransactions((prev) => [...parsed, ...prev])
-    setMessage(`Se importaron ${parsed.length} movimientos${errors.length ? ` (${errors.length} filas con aviso)` : ''}.`)
+    const nextMonth = dominantMonth(parsed)
+    if (nextMonth) setMonth(nextMonth)
+    setTransactions((prev) => (replaceOnImport ? parsed : [...parsed, ...prev]))
+    const formatNote = format ? ` · formato ${format}` : ''
+    setMessage(
+      `${label}: ${parsed.length} movimientos${formatNote}${
+        errors.length ? ` (${errors.length} filas con aviso)` : ''
+      }.`,
+    )
+  }
+
+  async function ingestFile(file: File) {
+    const text = await file.text()
+    const { transactions: parsed, errors, detectedFormat } = parseStatementCsv(text, file.name)
+    applyImport(parsed, `Importado «${file.name}»`, errors, detectedFormat)
+  }
+
+  async function loadSample(id: SampleId) {
+    const sample = SAMPLES[id]
+    const res = await fetch(sample.file)
+    const text = await res.text()
+    const { transactions: parsed, errors, detectedFormat } = parseStatementCsv(text)
+    applyImport(parsed, `Ejemplo ${sample.label}`, errors, detectedFormat)
   }
 
   function onCategoryChange(id: string, category: Category) {
@@ -56,6 +84,16 @@ export function PresupuestoPage() {
 
   function removeTx(id: string) {
     setTransactions((prev) => prev.filter((tx) => tx.id !== id))
+  }
+
+  function clearMonth() {
+    setTransactions((prev) => prev.filter((tx) => !tx.date.startsWith(month)))
+    setMessage(`Se borraron los movimientos de ${month}.`)
+  }
+
+  function clearAll() {
+    setTransactions([])
+    setMessage('Se borraron todos los movimientos.')
   }
 
   function addManual(e: FormEvent) {
@@ -75,15 +113,6 @@ export function PresupuestoPage() {
     setManual((m) => ({ ...m, description: '', amount: '' }))
   }
 
-  async function loadSample() {
-    const res = await fetch('/sample-estado-cuenta.csv')
-    const text = await res.text()
-    const { transactions: parsed } = parseStatementCsv(text)
-    setMonth('2026-03')
-    setTransactions((prev) => [...parsed, ...prev])
-    setMessage(`Ejemplo cargado: ${parsed.length} movimientos de marzo 2026.`)
-  }
-
   const goalRows: Array<{ key: keyof typeof DEFAULT_GOALS; label: string }> = [
     { key: 'costo_vida', label: 'Costo de vida · 50%' },
     { key: 'diversion', label: 'Diversión y recreación · 30%' },
@@ -96,20 +125,29 @@ export function PresupuestoPage() {
         <div>
           <h1>Presupuesto mensual</h1>
           <p>
-            Sube estados de cuenta (CSV), categoriza en costo de vida, diversión y ahorro, y compara
-            contra tu meta 50 / 30 / 20.
+            Prueba primero con CSV: sube un estado de cuenta, revisa categorías y mide tu meta 50 /
+            30 / 20. Los conectores automáticos vienen después.
           </p>
         </div>
         <div className="actions">
           <label>
             Mes
-            <input
-              type="month"
-              value={month}
-              onChange={(e) => setMonth(e.target.value)}
-            />
+            <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
           </label>
         </div>
+      </div>
+
+      <div className="panel">
+        <h2>Cómo probar con tu CSV</h2>
+        <ol className="howto">
+          <li>
+            Descarga un ejemplo abajo (Santander o Mercado Pago) <em>o</em> exporta movimientos desde
+            SuperNET / Mercado Pago en CSV o Excel guardado como CSV.
+          </li>
+          <li>Arrástralo al área de carga. La app detecta fechas <code>DD/MM/YYYY</code> y columnas Cargo/Abono.</li>
+          <li>Revisa el mes y corrige categorías con el menú de cada fila si hace falta.</li>
+          <li>Mira si te acercas a 50% vida · 30% diversión · 20% ahorro.</li>
+        </ol>
       </div>
 
       <div className="grid-3">
@@ -137,9 +175,7 @@ export function PresupuestoPage() {
             const share = progress.shares[key]
             const delta = progress.deltas[key]
             const onTrack =
-              key === 'ahorro'
-                ? delta >= -0.02
-                : Math.abs(delta) <= 0.05 || delta <= 0.05
+              key === 'ahorro' ? delta >= -0.02 : Math.abs(delta) <= 0.05 || delta <= 0.05
             return (
               <div key={key}>
                 <div className="goal-meta">
@@ -166,7 +202,7 @@ export function PresupuestoPage() {
 
       <div className="grid-2">
         <div className="panel">
-          <h2>Subir estado de cuenta</h2>
+          <h2>Subir estado de cuenta (CSV)</h2>
           <div
             className={`dropzone ${dragOver ? 'active' : ''}`}
             onDragOver={(e) => {
@@ -187,23 +223,52 @@ export function PresupuestoPage() {
                 elige archivo
                 <input
                   type="file"
-                  accept=".csv,text/csv"
+                  accept=".csv,text/csv,.txt"
                   hidden
                   onChange={(e) => {
                     const file = e.target.files?.[0]
                     if (file) void ingestFile(file)
+                    e.target.value = ''
                   }}
                 />
               </label>
             </p>
-            <p className="muted">Columnas sugeridas: fecha, descripcion, monto, cuenta</p>
+            <p className="muted">
+              Formatos: <code>fecha, descripcion, monto</code> · o Santander{' '}
+              <code>Fecha, Concepto, Cargo, Abono</code>
+            </p>
           </div>
+
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={replaceOnImport}
+              onChange={(e) => setReplaceOnImport(e.target.checked)}
+            />
+            Reemplazar todos los movimientos al importar (en vez de sumar)
+          </label>
+
           <div className="actions" style={{ marginTop: '0.9rem' }}>
-            <button type="button" className="btn secondary" onClick={() => void loadSample()}>
-              Cargar ejemplo
+            <button type="button" className="btn" onClick={() => void loadSample('santander')}>
+              Probar CSV Santander
             </button>
-            <a className="btn secondary" href="/sample-estado-cuenta.csv" download>
-              Descargar CSV muestra
+            <button
+              type="button"
+              className="btn secondary"
+              onClick={() => void loadSample('mercado_pago')}
+            >
+              Probar CSV Mercado Pago
+            </button>
+            <button type="button" className="btn secondary" onClick={() => void loadSample('mixto')}>
+              Mes mixto
+            </button>
+          </div>
+          <div className="actions" style={{ marginTop: '0.55rem' }}>
+            <a className="btn secondary" href="/sample-santander.csv" download>
+              Descargar Santander
+            </a>
+            <a className="btn secondary" href="/sample-mercado-pago.csv" download>
+              Descargar Mercado Pago
             </a>
           </div>
           {message ? <p className="muted">{message}</p> : null}
@@ -258,9 +323,21 @@ export function PresupuestoPage() {
       </div>
 
       <div className="panel">
-        <h2>Transacciones del mes</h2>
+        <div className="actions" style={{ justifyContent: 'space-between', marginBottom: '0.6rem' }}>
+          <h2 style={{ margin: 0 }}>Transacciones del mes</h2>
+          <div className="actions">
+            <button type="button" className="btn danger" onClick={clearMonth} disabled={!monthTx.length}>
+              Borrar mes
+            </button>
+            <button type="button" className="btn danger" onClick={clearAll} disabled={!transactions.length}>
+              Borrar todo
+            </button>
+          </div>
+        </div>
         {monthTx.length === 0 ? (
-          <div className="empty">Aún no hay movimientos en este mes. Sube un CSV o carga el ejemplo.</div>
+          <div className="empty">
+            Aún no hay movimientos en este mes. Usa «Probar CSV Santander» o sube tu propio archivo.
+          </div>
         ) : (
           <div className="table-wrap">
             <table>

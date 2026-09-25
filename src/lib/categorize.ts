@@ -85,6 +85,8 @@ const INGRESO_KEYWORDS = [
   'reembolso',
   'interes',
   'interés',
+  'cashback',
+  'transferencia recibida',
 ]
 
 function includesAny(text: string, keywords: string[]): boolean {
