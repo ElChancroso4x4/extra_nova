@@ -15,12 +15,30 @@ const BUDGET_CATEGORIES: Category[] = ['costo_vida', 'diversion', 'ahorro', 'ing
 
 type SampleId = 'mixto' | 'santander' | 'mercado_pago' | 'santander_pdf' | 'mercado_pago_pdf'
 
+const assetUrl = (path: string) => `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`
+
 const SAMPLES: Record<SampleId, { file: string; label: string; kind: 'csv' | 'pdf' }> = {
-  mixto: { file: '/sample-estado-cuenta.csv', label: 'Mes mixto', kind: 'csv' },
-  santander: { file: '/sample-santander.csv', label: 'Santander (Cargo/Abono)', kind: 'csv' },
-  mercado_pago: { file: '/sample-mercado-pago.csv', label: 'Mercado Pago', kind: 'csv' },
-  santander_pdf: { file: '/sample-santander.pdf', label: 'PDF Santander', kind: 'pdf' },
-  mercado_pago_pdf: { file: '/sample-mercado-pago.pdf', label: 'PDF Mercado Pago', kind: 'pdf' },
+  mixto: { file: assetUrl('sample-estado-cuenta.csv'), label: 'Mes mixto', kind: 'csv' },
+  santander: {
+    file: assetUrl('sample-santander.csv'),
+    label: 'Santander (Cargo/Abono)',
+    kind: 'csv',
+  },
+  mercado_pago: {
+    file: assetUrl('sample-mercado-pago.csv'),
+    label: 'Mercado Pago',
+    kind: 'csv',
+  },
+  santander_pdf: {
+    file: assetUrl('sample-santander.pdf'),
+    label: 'PDF Santander',
+    kind: 'pdf',
+  },
+  mercado_pago_pdf: {
+    file: assetUrl('sample-mercado-pago.pdf'),
+    label: 'PDF Mercado Pago',
+    kind: 'pdf',
+  },
 }
 
 function isPdfFile(file: File): boolean {
@@ -323,16 +341,16 @@ export function PresupuestoPage() {
             </button>
           </div>
           <div className="actions" style={{ marginTop: '0.55rem' }}>
-            <a className="btn secondary" href="/sample-santander.csv" download>
+            <a className="btn secondary" href={assetUrl('sample-santander.csv')} download>
               Descargar CSV Santander
             </a>
-            <a className="btn secondary" href="/sample-mercado-pago.csv" download>
+            <a className="btn secondary" href={assetUrl('sample-mercado-pago.csv')} download>
               Descargar CSV Mercado Pago
             </a>
-            <a className="btn secondary" href="/sample-santander.pdf" download>
+            <a className="btn secondary" href={assetUrl('sample-santander.pdf')} download>
               Descargar PDF Santander
             </a>
-            <a className="btn secondary" href="/sample-mercado-pago.pdf" download>
+            <a className="btn secondary" href={assetUrl('sample-mercado-pago.pdf')} download>
               Descargar PDF Mercado Pago
             </a>
           </div>
