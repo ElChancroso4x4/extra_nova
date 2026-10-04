@@ -407,6 +407,27 @@ textarea:focus {
   border-color: var(--leaf);
 }
 
+.dropzone.busy {
+  opacity: 0.85;
+  cursor: progress;
+  border-style: solid;
+}
+
+.import-status {
+  margin-top: 0.85rem;
+  padding: 0.65rem 0.8rem;
+  border-radius: 12px;
+  background: rgba(47, 143, 104, 0.1);
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+.import-status-busy {
+  background: rgba(181, 71, 8, 0.1);
+  color: var(--warn);
+}
+
 .chip {
   display: inline-flex;
   align-items: center;

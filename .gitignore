@@ -11,6 +11,8 @@ node_modules
 dist
 dist-ssr
 *.local
+# Generated at build/dev time from pdfjs-dist
+public/pdf.worker.min.mjs
 
 # Editor directories and files
 .vscode/*

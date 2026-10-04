@@ -22,12 +22,37 @@ function spaFallback(): Plugin {
   }
 }
 
+/**
+ * Ensure pdf.js worker is available at `${base}pdf.worker.min.mjs` in both
+ * `vite` (dev) and production builds (via public/ → dist/).
+ */
+function ensurePdfWorker(): Plugin {
+  const copy = () => {
+    copyFileSync(
+      resolve(import.meta.dirname, 'node_modules/pdfjs-dist/build/pdf.worker.min.mjs'),
+      resolve(import.meta.dirname, 'public/pdf.worker.min.mjs'),
+    )
+  }
+  return {
+    name: 'ensure-pdf-worker',
+    buildStart() {
+      copy()
+    },
+    configureServer() {
+      copy()
+    },
+  }
+}
+
 export default defineConfig({
   // Project site: https://elchancroso4x4.github.io/extra_nova/
   base: '/extra_nova/',
-  plugins: [react(), spaFallback()],
+  plugins: [react(), spaFallback(), ensurePdfWorker()],
   optimizeDeps: {
     include: ['pdfjs-dist'],
+  },
+  worker: {
+    format: 'es',
   },
   test: {
     environment: 'jsdom',

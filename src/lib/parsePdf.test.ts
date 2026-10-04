@@ -2,9 +2,52 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { detectBankHint, parseStatementPdf, parseStatementPdfText } from './parsePdf'
+import {
+  detectBankHint,
+  parseStatementPdf,
+  parseStatementPdfText,
+  resolvePdfWorkerSrc,
+} from './parsePdf'
 
 const here = dirname(fileURLToPath(import.meta.url))
+
+describe('resolvePdfWorkerSrc', () => {
+  it('keeps absolute http(s) URLs', () => {
+    expect(
+      resolvePdfWorkerSrc('https://cdn.example/worker.mjs', '/extra_nova/', 'https://app.test'),
+    ).toBe('https://cdn.example/worker.mjs')
+  })
+
+  it('joins site-absolute paths with origin (GitHub Pages base)', () => {
+    expect(
+      resolvePdfWorkerSrc(
+        '/extra_nova/assets/pdf.worker.min.mjs',
+        '/extra_nova/',
+        'https://elchancroso4x4.github.io',
+      ),
+    ).toBe('https://elchancroso4x4.github.io/extra_nova/assets/pdf.worker.min.mjs')
+  })
+
+  it('resolves relative worker paths under BASE_URL', () => {
+    expect(
+      resolvePdfWorkerSrc(
+        'assets/pdf.worker.min.mjs',
+        '/extra_nova/',
+        'https://elchancroso4x4.github.io',
+      ),
+    ).toBe('https://elchancroso4x4.github.io/extra_nova/assets/pdf.worker.min.mjs')
+  })
+
+  it('does not drop the /extra_nova/ prefix when the page is under /presupuesto/', () => {
+    const src = resolvePdfWorkerSrc(
+      '/extra_nova/assets/pdf.worker.min-abc.mjs',
+      '/extra_nova/',
+      'https://elchancroso4x4.github.io',
+    )
+    expect(src).toContain('/extra_nova/assets/')
+    expect(src).not.toContain('/presupuesto/')
+  })
+})
 
 describe('parseStatementPdfText', () => {
   it('parsea layout Santander Cargo/Abono desde fixture de texto', () => {

@@ -61,6 +61,7 @@ export function PresupuestoPage() {
   const [month, setMonth] = useState(currentYearMonth())
   const [dragOver, setDragOver] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  const [importing, setImporting] = useState(false)
   const [replaceOnImport, setReplaceOnImport] = useState(false)
   const [manual, setManual] = useState({
     date: `${currentYearMonth()}-01`,
@@ -101,40 +102,70 @@ export function PresupuestoPage() {
   }
 
   async function ingestFile(file: File) {
-    if (isPdfFile(file)) {
-      const buffer = await file.arrayBuffer()
-      const { transactions: parsed, errors, detectedFormat } = await parseStatementPdf(
-        buffer,
-        file.name.replace(/\.pdf$/i, ''),
-      )
-      applyImport(parsed, `Importado PDF «${file.name}»`, errors, detectedFormat)
-      return
-    }
+    if (importing) return
+    setImporting(true)
+    setMessage(isPdfFile(file) ? `Leyendo PDF «${file.name}»…` : `Leyendo CSV «${file.name}»…`)
+    try {
+      if (isPdfFile(file)) {
+        const buffer = await file.arrayBuffer()
+        const { transactions: parsed, errors, detectedFormat } = await parseStatementPdf(
+          buffer,
+          file.name.replace(/\.pdf$/i, ''),
+        )
+        applyImport(parsed, `Importado PDF «${file.name}»`, errors, detectedFormat)
+        return
+      }
 
-    if (!isCsvLikeFile(file)) {
-      setMessage(
-        `Tipo no soportado: «${file.name}». Usa CSV (.csv) o PDF de estado de cuenta (.pdf).`,
-      )
-      return
-    }
+      if (!isCsvLikeFile(file)) {
+        setMessage(
+          `Tipo no soportado: «${file.name}». Usa CSV (.csv) o PDF de estado de cuenta (.pdf).`,
+        )
+        return
+      }
 
-    const text = await file.text()
-    const { transactions: parsed, errors, detectedFormat } = parseStatementCsv(text, file.name)
-    applyImport(parsed, `Importado CSV «${file.name}»`, errors, detectedFormat)
+      const text = await file.text()
+      const { transactions: parsed, errors, detectedFormat } = parseStatementCsv(text, file.name)
+      applyImport(parsed, `Importado CSV «${file.name}»`, errors, detectedFormat)
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : 'Error desconocido'
+      setMessage(`No se pudo importar «${file.name}»: ${detail}`)
+    } finally {
+      setImporting(false)
+    }
   }
 
   async function loadSample(id: SampleId) {
+    if (importing) return
     const sample = SAMPLES[id]
-    const res = await fetch(sample.file)
-    if (sample.kind === 'pdf') {
-      const buffer = await res.arrayBuffer()
-      const { transactions: parsed, errors, detectedFormat } = await parseStatementPdf(buffer)
+    setImporting(true)
+    setMessage(
+      sample.kind === 'pdf'
+        ? `Leyendo ejemplo PDF «${sample.label}»…`
+        : `Leyendo ejemplo CSV «${sample.label}»…`,
+    )
+    try {
+      const res = await fetch(sample.file)
+      if (!res.ok) {
+        setMessage(
+          `No se pudo descargar el ejemplo (${res.status}). Comprueba la URL ${sample.file}.`,
+        )
+        return
+      }
+      if (sample.kind === 'pdf') {
+        const buffer = await res.arrayBuffer()
+        const { transactions: parsed, errors, detectedFormat } = await parseStatementPdf(buffer)
+        applyImport(parsed, `Ejemplo ${sample.label}`, errors, detectedFormat)
+        return
+      }
+      const text = await res.text()
+      const { transactions: parsed, errors, detectedFormat } = parseStatementCsv(text)
       applyImport(parsed, `Ejemplo ${sample.label}`, errors, detectedFormat)
-      return
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : 'Error desconocido'
+      setMessage(`No se pudo cargar el ejemplo «${sample.label}»: ${detail}`)
+    } finally {
+      setImporting(false)
     }
-    const text = await res.text()
-    const { transactions: parsed, errors, detectedFormat } = parseStatementCsv(text)
-    applyImport(parsed, `Ejemplo ${sample.label}`, errors, detectedFormat)
   }
 
   function onCategoryChange(id: string, category: Category) {
@@ -268,34 +299,43 @@ export function PresupuestoPage() {
         <div className="panel">
           <h2>Subir estado de cuenta (CSV o PDF)</h2>
           <div
-            className={`dropzone ${dragOver ? 'active' : ''}`}
+            className={`dropzone ${dragOver ? 'active' : ''} ${importing ? 'busy' : ''}`}
+            aria-busy={importing}
             onDragOver={(e) => {
               e.preventDefault()
-              setDragOver(true)
+              if (!importing) setDragOver(true)
             }}
             onDragLeave={() => setDragOver(false)}
             onDrop={(e) => {
               e.preventDefault()
               setDragOver(false)
+              if (importing) return
               const file = e.dataTransfer.files?.[0]
               if (file) void ingestFile(file)
             }}
           >
             <p>
-              Arrastra un CSV o PDF aquí o{' '}
-              <label style={{ color: 'var(--moss)', fontWeight: 700, cursor: 'pointer' }}>
-                elige archivo
-                <input
-                  type="file"
-                  accept=".csv,text/csv,.txt,application/pdf,.pdf"
-                  hidden
-                  onChange={(e) => {
-                    const file = e.target.files?.[0]
-                    if (file) void ingestFile(file)
-                    e.target.value = ''
-                  }}
-                />
-              </label>
+              {importing ? (
+                'Procesando archivo…'
+              ) : (
+                <>
+                  Arrastra un CSV o PDF aquí o{' '}
+                  <label style={{ color: 'var(--moss)', fontWeight: 700, cursor: 'pointer' }}>
+                    elige archivo
+                    <input
+                      type="file"
+                      accept=".csv,text/csv,.txt,application/pdf,.pdf"
+                      hidden
+                      disabled={importing}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0]
+                        if (file) void ingestFile(file)
+                        e.target.value = ''
+                      }}
+                    />
+                  </label>
+                </>
+              )}
             </p>
             <p className="muted">
               Acepta <strong>.csv</strong> / <strong>.txt</strong> y <strong>.pdf</strong> (texto
@@ -314,27 +354,44 @@ export function PresupuestoPage() {
           </label>
 
           <div className="actions" style={{ marginTop: '0.9rem' }}>
-            <button type="button" className="btn" onClick={() => void loadSample('santander')}>
+            <button
+              type="button"
+              className="btn"
+              disabled={importing}
+              onClick={() => void loadSample('santander')}
+            >
               Probar CSV Santander
             </button>
             <button
               type="button"
               className="btn secondary"
+              disabled={importing}
               onClick={() => void loadSample('mercado_pago')}
             >
               Probar CSV Mercado Pago
             </button>
-            <button type="button" className="btn secondary" onClick={() => void loadSample('mixto')}>
+            <button
+              type="button"
+              className="btn secondary"
+              disabled={importing}
+              onClick={() => void loadSample('mixto')}
+            >
               Mes mixto
             </button>
           </div>
           <div className="actions" style={{ marginTop: '0.55rem' }}>
-            <button type="button" className="btn" onClick={() => void loadSample('santander_pdf')}>
+            <button
+              type="button"
+              className="btn"
+              disabled={importing}
+              onClick={() => void loadSample('santander_pdf')}
+            >
               Probar PDF Santander
             </button>
             <button
               type="button"
               className="btn secondary"
+              disabled={importing}
               onClick={() => void loadSample('mercado_pago_pdf')}
             >
               Probar PDF Mercado Pago
@@ -354,7 +411,11 @@ export function PresupuestoPage() {
               Descargar PDF Mercado Pago
             </a>
           </div>
-          {message ? <p className="muted">{message}</p> : null}
+          {message ? (
+            <p className={`import-status ${importing ? 'import-status-busy' : ''}`} role="status">
+              {message}
+            </p>
+          ) : null}
         </div>
 
         <div className="panel">

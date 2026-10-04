@@ -4,6 +4,33 @@ import type { Transaction } from './types'
 
 let workerConfigured = false
 
+const PDF_PARSE_TIMEOUT_MS = 45_000
+
+/**
+ * Resolve pdf.js workerSrc for the current origin + Vite BASE_URL.
+ * Always returns an absolute URL so module workers work under `/extra_nova/presupuesto/`.
+ */
+export function resolvePdfWorkerSrc(
+  workerUrl: string = `${import.meta.env.BASE_URL}pdf.worker.min.mjs`,
+  baseUrl: string = import.meta.env.BASE_URL,
+  origin: string = typeof window !== 'undefined' ? window.location.origin : 'http://localhost',
+): string {
+  const raw = (workerUrl || '').trim()
+  if (/^https?:\/\//i.test(raw) || raw.startsWith('blob:') || raw.startsWith('file:')) {
+    return raw
+  }
+
+  // Absolute site path (e.g. `/extra_nova/pdf.worker.min.mjs`)
+  if (raw.startsWith('/')) {
+    return new URL(raw, origin).href
+  }
+
+  // Relative fallback — join with BASE_URL then origin
+  const base = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`
+  const rel = raw.replace(/^\.\//, '')
+  return new URL(`${base}${rel}`, origin).href
+}
+
 async function loadPdfJs() {
   const pdfjs = await import('pdfjs-dist')
   if (!workerConfigured) {
@@ -17,9 +44,9 @@ async function loadPdfJs() {
       pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
         require.resolve('pdfjs-dist/legacy/build/pdf.worker.min.mjs'),
       ).href
-    } else if (typeof window !== 'undefined') {
-      const worker = await import('pdfjs-dist/build/pdf.worker.min.mjs?url')
-      pdfjs.GlobalWorkerOptions.workerSrc = worker.default
+    } else {
+      // Stable path under Vite base (file copied into public/ by ensurePdfWorker plugin)
+      pdfjs.GlobalWorkerOptions.workerSrc = resolvePdfWorkerSrc()
     }
     workerConfigured = true
   }
@@ -28,6 +55,22 @@ async function loadPdfJs() {
 
 function uid(): string {
   return crypto.randomUUID()
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms)
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (err) => {
+        clearTimeout(timer)
+        reject(err)
+      },
+    )
+  })
 }
 
 const AMOUNT_TOKEN =
@@ -257,7 +300,11 @@ export async function parseStatementPdf(
   defaultAccount = 'Cuenta PDF',
 ): Promise<PdfParseResult> {
   try {
-    const extractedText = await extractPdfText(data)
+    const extractedText = await withTimeout(
+      extractPdfText(data),
+      PDF_PARSE_TIMEOUT_MS,
+      'Tiempo de espera agotado al leer el PDF (worker pdf.js). Revisa la conexión o prueba CSV.',
+    )
     if (!extractedText.trim()) {
       return {
         transactions: [],
