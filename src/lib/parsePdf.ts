@@ -1,10 +1,14 @@
 import { categorizeTransaction } from './categorize'
 import { normalizeDate, parseAmount } from './parseCsv'
+import { ensurePdfJsBinaryPolyfills } from './pdfCompat'
 import type { Transaction } from './types'
 
 let workerConfigured = false
+let workerBlobUrl: string | null = null
 
-const PDF_PARSE_TIMEOUT_MS = 45_000
+const PDF_PARSE_TIMEOUT_MS = 60_000
+/** Soft cap — very large bank PDFs are usually scans; prefer CSV/XML. */
+export const PDF_MAX_BYTES = 20 * 1024 * 1024
 
 /**
  * Resolve pdf.js workerSrc for the current origin + Vite BASE_URL.
@@ -31,7 +35,35 @@ export function resolvePdfWorkerSrc(
   return new URL(`${base}${rel}`, origin).href
 }
 
+/**
+ * Fetch the worker and re-wrap as a blob URL with an explicit JS MIME type.
+ * Helps Safari / strict hosts that serve `.mjs` with awkward Content-Types.
+ */
+async function resolveWorkerSrcPreferBlob(absoluteUrl: string): Promise<string> {
+  if (typeof fetch !== 'function' || typeof URL.createObjectURL !== 'function') {
+    return absoluteUrl
+  }
+  try {
+    const res = await fetch(absoluteUrl, { credentials: 'same-origin' })
+    if (!res.ok) return absoluteUrl
+    const buf = await res.arrayBuffer()
+    if (workerBlobUrl) {
+      try {
+        URL.revokeObjectURL(workerBlobUrl)
+      } catch {
+        /* ignore */
+      }
+    }
+    const blob = new Blob([buf], { type: 'text/javascript' })
+    workerBlobUrl = URL.createObjectURL(blob)
+    return workerBlobUrl
+  } catch {
+    return absoluteUrl
+  }
+}
+
 async function loadPdfJs() {
+  ensurePdfJsBinaryPolyfills()
   const pdfjs = await import('pdfjs-dist')
   if (!workerConfigured) {
     if (import.meta.env.MODE === 'test') {
@@ -45,8 +77,8 @@ async function loadPdfJs() {
         require.resolve('pdfjs-dist/legacy/build/pdf.worker.min.mjs'),
       ).href
     } else {
-      // Stable path under Vite base (file copied into public/ by ensurePdfWorker plugin)
-      pdfjs.GlobalWorkerOptions.workerSrc = resolvePdfWorkerSrc()
+      const absolute = resolvePdfWorkerSrc()
+      pdfjs.GlobalWorkerOptions.workerSrc = await resolveWorkerSrcPreferBlob(absolute)
     }
     workerConfigured = true
   }
@@ -78,6 +110,10 @@ const AMOUNT_TOKEN =
 
 const DATE_AT_START =
   /^(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{2}-\d{2})(?:\s+|[,|]\s*)(.+)$/
+
+const DATE_ONLY = /^(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{2}-\d{2})$/
+const DATE_ANYWHERE =
+  /(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{2}-\d{2})/
 
 const SKIP_LINE =
   /^(fecha|concepto|descripcion|descripción|cargo|abono|monto|importe|saldo|total|page|pagina|página|estado\s+de\s+cuenta|movimientos|detalle)/i
@@ -170,6 +206,70 @@ function resolveLineAmount(
 }
 
 /**
+ * Real bank PDFs often split a row across lines (date / concept / amounts).
+ * Coalesce date-only lines with the following concept+amount fragments.
+ */
+export function coalescePdfLines(rawLines: string[]): string[] {
+  const lines = rawLines.map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean)
+  const out: string[] = []
+  let i = 0
+  while (i < lines.length) {
+    const line = lines[i]!
+    if (DATE_ONLY.test(line)) {
+      const parts = [line]
+      let j = i + 1
+      let sawAmount = false
+      while (j < lines.length && j < i + 6) {
+        const next = lines[j]!
+        if (DATE_ONLY.test(next) || DATE_AT_START.test(next)) break
+        if (isSkippable(next) && !findAmountMatches(next).length) {
+          j += 1
+          continue
+        }
+        parts.push(next)
+        if (findAmountMatches(next).length) {
+          sawAmount = true
+          // Keep one more line for cargo/abono pairs (amount-only, not a new dated row)
+          const peek = lines[j + 1]
+          if (
+            peek &&
+            findAmountMatches(peek).length &&
+            !DATE_ONLY.test(peek) &&
+            !DATE_AT_START.test(peek) &&
+            !DATE_ANYWHERE.test(peek)
+          ) {
+            parts.push(peek)
+            j += 1
+          }
+          j += 1
+          break
+        }
+        j += 1
+      }
+      out.push(parts.join(' '))
+      i = sawAmount ? j : i + 1
+      continue
+    }
+
+    // Date not at start — normalize «CONCEPTO 01/03/2026 100.00»
+    if (!DATE_AT_START.test(line) && DATE_ANYWHERE.test(line) && findAmountMatches(line).length) {
+      const m = line.match(DATE_ANYWHERE)
+      if (m && m.index !== undefined && m.index > 0) {
+        const date = m[0]
+        const rest = `${line.slice(0, m.index)} ${line.slice(m.index + date.length)}`.replace(/\s+/g, ' ').trim()
+        out.push(`${date} ${rest}`)
+        i += 1
+        continue
+      }
+    }
+
+    out.push(line)
+    i += 1
+  }
+  return out
+}
+
+/**
  * Parse plain text extracted from a Mexican bank-statement PDF into transactions.
  * Works on line-oriented layouts (Fecha + Concepto + Monto / Cargo / Abono).
  */
@@ -183,11 +283,7 @@ export function parseStatementPdfText(
   let detectedFormat = detectFormat(text)
   const account = bankHint ?? defaultAccount
 
-  const lines = text
-    .replace(/\r/g, '')
-    .split('\n')
-    .map((l) => l.replace(/\s+/g, ' ').trim())
-    .filter(Boolean)
+  const lines = coalescePdfLines(text.replace(/\r/g, '').split('\n'))
 
   let parsedLines = 0
 
@@ -198,7 +294,7 @@ export function parseStatementPdfText(
     if (!dated) continue
 
     const date = normalizeDate(dated[1])
-    let rest = dated[2].trim()
+    const rest = dated[2].trim()
     if (!date) {
       errors.push(`Línea ${index + 1}: fecha inválida «${dated[1]}»`)
       continue
@@ -243,8 +339,10 @@ export function parseStatementPdfText(
   }
 
   if (transactions.length === 0) {
+    const preview = lines.slice(0, 4).join(' · ').slice(0, 160)
     errors.unshift(
-      'No se reconocieron movimientos en el PDF. Prueba un estado con filas «fecha + concepto + monto» (o Cargo/Abono), o usa CSV.',
+      'No se reconocieron movimientos en el PDF. Prueba un estado con filas «fecha + concepto + monto» (o Cargo/Abono), exporta CSV/XML, o usa un PDF con texto seleccionable (no escaneo).' +
+        (preview ? ` Texto detectado: «${preview}…»` : ''),
     )
   } else if (detectedFormat === 'pdf_desconocido') {
     detectedFormat = 'pdf_line_simple'
@@ -257,19 +355,16 @@ export function parseStatementPdfText(
   return { transactions, errors, detectedFormat, bankHint }
 }
 
-/**
- * Extract readable text from a PDF ArrayBuffer using pdf.js (client-side).
- */
-export async function extractPdfText(data: ArrayBuffer): Promise<string> {
-  const { getDocument } = await loadPdfJs()
-  const loadingTask = getDocument({
-    data: new Uint8Array(data),
-    useSystemFonts: true,
-  })
-  const pdf = await loadingTask.promise
+async function extractTextFromPdfDoc(pdf: {
+  numPages: number
+  getPage: (n: number) => Promise<{
+    getTextContent: () => Promise<{ items: unknown[] }>
+  }>
+}): Promise<string> {
   const pages: string[] = []
+  const maxPages = Math.min(pdf.numPages, 40)
 
-  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum += 1) {
+  for (let pageNum = 1; pageNum <= maxPages; pageNum += 1) {
     const page = await pdf.getPage(pageNum)
     const content = await page.getTextContent()
     const parts: string[] = []
@@ -291,7 +386,44 @@ export async function extractPdfText(data: ArrayBuffer): Promise<string> {
     pages.push(parts.join('').replace(/[ \t]+\n/g, '\n'))
   }
 
+  if (pdf.numPages > maxPages) {
+    pages.push(`\n[…] solo se leyeron las primeras ${maxPages} páginas de ${pdf.numPages}`)
+  }
+
   return pages.join('\n')
+}
+
+/**
+ * Extract readable text from a PDF ArrayBuffer using pdf.js (client-side).
+ * Uses the legacy build + binary polyfills; pdf.js falls back to a fake worker
+ * on the main thread if the module Worker fails to start.
+ */
+export async function extractPdfText(data: ArrayBuffer): Promise<string> {
+  ensurePdfJsBinaryPolyfills()
+  const { getDocument } = await loadPdfJs()
+  // Fresh copy — pdf.js may transfer the TypedArray to the worker thread
+  const bytes = Uint8Array.from(new Uint8Array(data))
+
+  const loadingTask = getDocument({
+    data: bytes,
+    useSystemFonts: true,
+    useWorkerFetch: false,
+  })
+  const pdf = await loadingTask.promise
+  return extractTextFromPdfDoc(pdf)
+}
+
+function friendlyPdfError(message: string): string {
+  if (/password|encrypted/i.test(message)) {
+    return 'El PDF está protegido con contraseña. Quítala o exporta CSV/XML.'
+  }
+  if (/toHex/i.test(message)) {
+    return 'Tu navegador necesita una actualización para leer PDF (Uint8Array.toHex). Prueba CSV/XML o actualiza el navegador.'
+  }
+  if (/Invalid PDF|Missing PDF|corrupted/i.test(message)) {
+    return 'El archivo no parece un PDF válido o está dañado.'
+  }
+  return message
 }
 
 /** Full pipeline: PDF bytes → text → transactions (same model as CSV). */
@@ -299,17 +431,35 @@ export async function parseStatementPdf(
   data: ArrayBuffer,
   defaultAccount = 'Cuenta PDF',
 ): Promise<PdfParseResult> {
+  if (data.byteLength === 0) {
+    return {
+      transactions: [],
+      errors: ['El PDF está vacío.'],
+      detectedFormat: 'pdf_desconocido',
+    }
+  }
+  if (data.byteLength > PDF_MAX_BYTES) {
+    const mb = (data.byteLength / (1024 * 1024)).toFixed(1)
+    return {
+      transactions: [],
+      errors: [
+        `El PDF pesa ${mb} MB (máx. ${PDF_MAX_BYTES / (1024 * 1024)} MB). Exporta CSV/XML o un extracto más corto.`,
+      ],
+      detectedFormat: 'pdf_desconocido',
+    }
+  }
+
   try {
     const extractedText = await withTimeout(
       extractPdfText(data),
       PDF_PARSE_TIMEOUT_MS,
-      'Tiempo de espera agotado al leer el PDF (worker pdf.js). Revisa la conexión o prueba CSV.',
+      'Tiempo de espera agotado al leer el PDF (worker pdf.js). Prueba CSV/XML o un archivo más pequeño.',
     )
     if (!extractedText.trim()) {
       return {
         transactions: [],
         errors: [
-          'El PDF no tiene texto seleccionable (puede ser escaneo/imagen). Exporta CSV o un PDF con texto.',
+          'El PDF no tiene texto seleccionable (puede ser escaneo/imagen). Exporta CSV, XML de movimientos o un PDF con texto.',
         ],
         detectedFormat: 'pdf_desconocido',
         extractedText,
@@ -321,7 +471,7 @@ export async function parseStatementPdf(
     const message = err instanceof Error ? err.message : 'Error al leer el PDF'
     return {
       transactions: [],
-      errors: [`No se pudo abrir el PDF: ${message}`],
+      errors: [`No se pudo abrir el PDF: ${friendlyPdfError(message)}`],
       detectedFormat: 'pdf_desconocido',
     }
   }

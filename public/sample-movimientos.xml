@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<EstadoDeCuenta banco="Banorte" cuenta="****4521" moneda="MXN">
+  <Movimientos>
+    <Movimiento fecha="01/03/2026" concepto="SUPERAMA POLANCO" cargo="1850.40" abono="" />
+    <Movimiento fecha="02/03/2026" concepto="NETFLIX.COM" cargo="299.00" abono="" />
+    <Movimiento fecha="03/03/2026" concepto="CFE SUMINISTRADOR" cargo="1240.00" abono="" />
+    <Movimiento fecha="04/03/2026" concepto="SPEI ENVIADO BITSO" cargo="5000.00" abono="" />
+    <Movimiento fecha="05/03/2026" concepto="UBER EATS CDMX" cargo="287.50" abono="" />
+    <Movimiento>
+      <Fecha>15/03/2026</Fecha>
+      <Concepto>NOMINA EMPRESA</Concepto>
+      <Cargo></Cargo>
+      <Abono>45000.00</Abono>
+    </Movimiento>
+    <Movimiento fecha="16/03/2026" concepto="STEAM GAMES" cargo="650.00" abono="0" />
+    <Movimiento fecha="20/03/2026" concepto="SPEI ENVIADO CETES DIRECTO" cargo="3000.00" abono="" />
+  </Movimientos>
+</EstadoDeCuenta>

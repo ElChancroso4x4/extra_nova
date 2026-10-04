@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
+  coalescePdfLines,
   detectBankHint,
   parseStatementPdf,
   parseStatementPdfText,
@@ -111,6 +112,18 @@ describe('parseStatementPdfText', () => {
   it('detecta banco por encabezado', () => {
     expect(detectBankHint('BBVA Bancomer estado')).toBe('BBVA')
     expect(detectBankHint('Movimientos Banorte')).toBe('Banorte')
+  })
+
+  it('une filas fragmentadas fecha / concepto / monto', () => {
+    const coalesced = coalescePdfLines([
+      '01/03/2026',
+      'SUPERAMA POLANCO',
+      '1,850.40',
+      '02/03/2026 NETFLIX.COM 299.00',
+    ])
+    expect(coalesced[0]).toMatch(/01\/03\/2026 SUPERAMA POLANCO 1,850\.40/)
+    const { transactions } = parseStatementPdfText(coalesced.join('\n'))
+    expect(transactions.find((t) => /superama/i.test(t.description))?.amount).toBe(-1850.4)
   })
 })
 
