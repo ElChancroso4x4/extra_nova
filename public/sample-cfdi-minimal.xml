@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/4"
+  Version="4.0"
+  Fecha="2026-03-10T14:30:00"
+  SubTotal="1000.00"
+  Total="1160.00"
+  TipoDeComprobante="I"
+  Moneda="MXN">
+  <cfdi:Emisor Rfc="AAA010101AAA" Nombre="SERVICIOS DEMO SA DE CV" />
+  <cfdi:Receptor Rfc="XAXX010101000" Nombre="PUBLICO GENERAL" />
+  <cfdi:Conceptos>
+    <cfdi:Concepto ClaveProdServ="84111506" Cantidad="1" Descripcion="Membresia gym marzo" ValorUnitario="1000.00" Importe="1000.00" />
+  </cfdi:Conceptos>
+</cfdi:Comprobante>

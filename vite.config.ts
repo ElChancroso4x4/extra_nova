@@ -23,13 +23,13 @@ function spaFallback(): Plugin {
 }
 
 /**
- * Ensure pdf.js worker is available at `${base}pdf.worker.min.mjs` in both
- * `vite` (dev) and production builds (via public/ → dist/).
+ * Ensure the **legacy** pdf.js worker is at `${base}pdf.worker.min.mjs`.
+ * Legacy includes Uint8Array.toHex polyfills required outside Chromium 140+.
  */
 function ensurePdfWorker(): Plugin {
   const copy = () => {
     copyFileSync(
-      resolve(import.meta.dirname, 'node_modules/pdfjs-dist/build/pdf.worker.min.mjs'),
+      resolve(import.meta.dirname, 'node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs'),
       resolve(import.meta.dirname, 'public/pdf.worker.min.mjs'),
     )
   }
@@ -48,6 +48,15 @@ export default defineConfig({
   // Project site: https://elchancroso4x4.github.io/extra_nova/
   base: '/extra_nova/',
   plugins: [react(), spaFallback(), ensurePdfWorker()],
+  resolve: {
+    // Always use legacy build: modern pdf.js needs Uint8Array.toHex (Chrome 140+).
+    alias: [
+      {
+        find: /^pdfjs-dist$/,
+        replacement: 'pdfjs-dist/legacy/build/pdf.mjs',
+      },
+    ],
+  },
   optimizeDeps: {
     include: ['pdfjs-dist'],
   },
@@ -57,12 +66,5 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
-    // Node lacks DOMMatrix in the modern pdf.js build; only remap the package root
-    alias: [
-      {
-        find: /^pdfjs-dist$/,
-        replacement: 'pdfjs-dist/legacy/build/pdf.mjs',
-      },
-    ],
   },
 })
