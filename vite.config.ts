@@ -8,7 +8,7 @@ function spaFallback(): Plugin {
   return {
     name: 'spa-github-pages-fallback',
     closeBundle() {
-      const dist = resolve(__dirname, 'dist')
+      const dist = resolve(import.meta.dirname, 'dist')
       copyFileSync(resolve(dist, 'index.html'), resolve(dist, '404.html'))
     },
   }
