@@ -6,12 +6,12 @@ export function HomePage() {
       <section className="hero">
         <h1>Caudal</h1>
         <p>
-          Empieza con un CSV de tus estados de cuenta, acomoda el mes en 50 / 30 / 20 y mira tu
-          patrimonio. Los conectores automáticos llegan cuando ya te guste el flujo.
+          Empieza con un CSV o PDF de tus estados de cuenta, acomoda el mes en 50 / 30 / 20 y mira
+          tu patrimonio. Los conectores automáticos llegan cuando ya te guste el flujo.
         </p>
         <div className="hero-actions">
           <Link className="btn ghost" to="/presupuesto">
-            Probar con CSV
+            Probar con CSV / PDF
           </Link>
           <Link className="btn secondary" to="/balance">
             Ver balance
