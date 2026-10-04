@@ -1,0 +1,40 @@
+%PDF-1.4
+1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj
+2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj
+3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>endobj
+4 0 obj<< /Length 378 >>stream
+BT
+/F1 11 Tf
+50 760 Td
+(Mercado Pago) Tj
+0 -18 Td
+(Mercado Pago - Movimientos) Tj
+0 -14 Td
+(fecha descripcion monto) Tj
+0 -14 Td
+(2026-03-01 PAGO SERVICIO Luz -420.00) Tj
+0 -14 Td
+(2026-03-05 TRANSFERENCIA RECIBIDA 2500.00) Tj
+0 -14 Td
+(2026-03-08 NETFLIX.COM -299.00) Tj
+0 -14 Td
+(2026-03-12 SUPERAMA -890.50) Tj
+0 -14 Td
+(2026-03-18 SPEI ENVIADO BITSO -1500.00) Tj
+0 -14 Td
+ET
+endstream
+endobj
+5 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000056 00000 n 
+0000000111 00000 n 
+0000000235 00000 n 
+0000000662 00000 n 
+trailer<< /Size 6 /Root 1 0 R >>
+startxref
+730
+%%EOF

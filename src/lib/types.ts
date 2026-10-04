@@ -7,7 +7,7 @@ export type Transaction = {
   amount: number
   account: string
   category: Category
-  source: 'csv' | 'manual'
+  source: 'csv' | 'pdf' | 'manual'
 }
 
 export type AccountKind = 'banco' | 'inversion' | 'crypto' | 'efectivo' | 'pasivo'

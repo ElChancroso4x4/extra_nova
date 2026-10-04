@@ -8,16 +8,34 @@ import {
 } from '../lib/types'
 import { computeGoalProgress, currentYearMonth, formatMxn, formatPct } from '../lib/goals'
 import { dominantMonth, parseStatementCsv } from '../lib/parseCsv'
+import { parseStatementPdf } from '../lib/parsePdf'
 import { loadTransactions, saveTransactions } from '../lib/storage'
 
 const BUDGET_CATEGORIES: Category[] = ['costo_vida', 'diversion', 'ahorro', 'ingreso', 'ignorar']
 
-type SampleId = 'mixto' | 'santander' | 'mercado_pago'
+type SampleId = 'mixto' | 'santander' | 'mercado_pago' | 'santander_pdf' | 'mercado_pago_pdf'
 
-const SAMPLES: Record<SampleId, { file: string; label: string }> = {
-  mixto: { file: '/sample-estado-cuenta.csv', label: 'Mes mixto' },
-  santander: { file: '/sample-santander.csv', label: 'Santander (Cargo/Abono)' },
-  mercado_pago: { file: '/sample-mercado-pago.csv', label: 'Mercado Pago' },
+const SAMPLES: Record<SampleId, { file: string; label: string; kind: 'csv' | 'pdf' }> = {
+  mixto: { file: '/sample-estado-cuenta.csv', label: 'Mes mixto', kind: 'csv' },
+  santander: { file: '/sample-santander.csv', label: 'Santander (Cargo/Abono)', kind: 'csv' },
+  mercado_pago: { file: '/sample-mercado-pago.csv', label: 'Mercado Pago', kind: 'csv' },
+  santander_pdf: { file: '/sample-santander.pdf', label: 'PDF Santander', kind: 'pdf' },
+  mercado_pago_pdf: { file: '/sample-mercado-pago.pdf', label: 'PDF Mercado Pago', kind: 'pdf' },
+}
+
+function isPdfFile(file: File): boolean {
+  const name = file.name.toLowerCase()
+  return file.type === 'application/pdf' || name.endsWith('.pdf')
+}
+
+function isCsvLikeFile(file: File): boolean {
+  const name = file.name.toLowerCase()
+  return (
+    file.type === 'text/csv' ||
+    file.type === 'text/plain' ||
+    name.endsWith('.csv') ||
+    name.endsWith('.txt')
+  )
 }
 
 export function PresupuestoPage() {
@@ -65,14 +83,37 @@ export function PresupuestoPage() {
   }
 
   async function ingestFile(file: File) {
+    if (isPdfFile(file)) {
+      const buffer = await file.arrayBuffer()
+      const { transactions: parsed, errors, detectedFormat } = await parseStatementPdf(
+        buffer,
+        file.name.replace(/\.pdf$/i, ''),
+      )
+      applyImport(parsed, `Importado PDF «${file.name}»`, errors, detectedFormat)
+      return
+    }
+
+    if (!isCsvLikeFile(file)) {
+      setMessage(
+        `Tipo no soportado: «${file.name}». Usa CSV (.csv) o PDF de estado de cuenta (.pdf).`,
+      )
+      return
+    }
+
     const text = await file.text()
     const { transactions: parsed, errors, detectedFormat } = parseStatementCsv(text, file.name)
-    applyImport(parsed, `Importado «${file.name}»`, errors, detectedFormat)
+    applyImport(parsed, `Importado CSV «${file.name}»`, errors, detectedFormat)
   }
 
   async function loadSample(id: SampleId) {
     const sample = SAMPLES[id]
     const res = await fetch(sample.file)
+    if (sample.kind === 'pdf') {
+      const buffer = await res.arrayBuffer()
+      const { transactions: parsed, errors, detectedFormat } = await parseStatementPdf(buffer)
+      applyImport(parsed, `Ejemplo ${sample.label}`, errors, detectedFormat)
+      return
+    }
     const text = await res.text()
     const { transactions: parsed, errors, detectedFormat } = parseStatementCsv(text)
     applyImport(parsed, `Ejemplo ${sample.label}`, errors, detectedFormat)
@@ -125,8 +166,8 @@ export function PresupuestoPage() {
         <div>
           <h1>Presupuesto mensual</h1>
           <p>
-            Prueba primero con CSV: sube un estado de cuenta, revisa categorías y mide tu meta 50 /
-            30 / 20. Los conectores automáticos vienen después.
+            Sube un estado de cuenta en CSV o PDF, revisa categorías y mide tu meta 50 / 30 / 20. Los
+            conectores automáticos vienen después.
           </p>
         </div>
         <div className="actions">
@@ -138,15 +179,20 @@ export function PresupuestoPage() {
       </div>
 
       <div className="panel">
-        <h2>Cómo probar con tu CSV</h2>
+        <h2>Cómo importar CSV o PDF</h2>
         <ol className="howto">
           <li>
-            Descarga un ejemplo abajo (Santander o Mercado Pago) <em>o</em> exporta movimientos desde
-            SuperNET / Mercado Pago en CSV o Excel guardado como CSV.
+            Usa un ejemplo abajo <em>o</em> exporta movimientos desde SuperNET / Mercado Pago en CSV
+            o PDF con texto seleccionable (no escaneo).
           </li>
-          <li>Arrástralo al área de carga. La app detecta fechas <code>DD/MM/YYYY</code> y columnas Cargo/Abono.</li>
-          <li>Revisa el mes y corrige categorías con el menú de cada fila si hace falta.</li>
-          <li>Mira si te acercas a 50% vida · 30% diversión · 20% ahorro.</li>
+          <li>
+            Arrástralo al área de carga. CSV: columnas <code>fecha/descripcion/monto</code> o
+            Cargo/Abono. PDF: filas con fecha + concepto + monto.
+          </li>
+          <li>
+            Deja desmarcado «Reemplazar…» para sumar varias cuentas en secuencia (CSV o PDF).
+          </li>
+          <li>Revisa el mes, corrige categorías y mira 50% vida · 30% diversión · 20% ahorro.</li>
         </ol>
       </div>
 
@@ -202,7 +248,7 @@ export function PresupuestoPage() {
 
       <div className="grid-2">
         <div className="panel">
-          <h2>Subir estado de cuenta (CSV)</h2>
+          <h2>Subir estado de cuenta (CSV o PDF)</h2>
           <div
             className={`dropzone ${dragOver ? 'active' : ''}`}
             onDragOver={(e) => {
@@ -218,12 +264,12 @@ export function PresupuestoPage() {
             }}
           >
             <p>
-              Arrastra un CSV aquí o{' '}
+              Arrastra un CSV o PDF aquí o{' '}
               <label style={{ color: 'var(--moss)', fontWeight: 700, cursor: 'pointer' }}>
                 elige archivo
                 <input
                   type="file"
-                  accept=".csv,text/csv,.txt"
+                  accept=".csv,text/csv,.txt,application/pdf,.pdf"
                   hidden
                   onChange={(e) => {
                     const file = e.target.files?.[0]
@@ -234,8 +280,9 @@ export function PresupuestoPage() {
               </label>
             </p>
             <p className="muted">
-              Formatos: <code>fecha, descripcion, monto</code> · o Santander{' '}
-              <code>Fecha, Concepto, Cargo, Abono</code>
+              Acepta <strong>.csv</strong> / <strong>.txt</strong> y <strong>.pdf</strong> (texto
+              seleccionable). CSV: <code>fecha, descripcion, monto</code> o{' '}
+              <code>Fecha, Concepto, Cargo, Abono</code>. PDF: se procesa en el navegador con pdf.js.
             </p>
           </div>
 
@@ -264,11 +311,29 @@ export function PresupuestoPage() {
             </button>
           </div>
           <div className="actions" style={{ marginTop: '0.55rem' }}>
+            <button type="button" className="btn" onClick={() => void loadSample('santander_pdf')}>
+              Probar PDF Santander
+            </button>
+            <button
+              type="button"
+              className="btn secondary"
+              onClick={() => void loadSample('mercado_pago_pdf')}
+            >
+              Probar PDF Mercado Pago
+            </button>
+          </div>
+          <div className="actions" style={{ marginTop: '0.55rem' }}>
             <a className="btn secondary" href="/sample-santander.csv" download>
-              Descargar Santander
+              Descargar CSV Santander
             </a>
             <a className="btn secondary" href="/sample-mercado-pago.csv" download>
-              Descargar Mercado Pago
+              Descargar CSV Mercado Pago
+            </a>
+            <a className="btn secondary" href="/sample-santander.pdf" download>
+              Descargar PDF Santander
+            </a>
+            <a className="btn secondary" href="/sample-mercado-pago.pdf" download>
+              Descargar PDF Mercado Pago
             </a>
           </div>
           {message ? <p className="muted">{message}</p> : null}
@@ -336,7 +401,7 @@ export function PresupuestoPage() {
         </div>
         {monthTx.length === 0 ? (
           <div className="empty">
-            Aún no hay movimientos en este mes. Usa «Probar CSV Santander» o sube tu propio archivo.
+            Aún no hay movimientos en este mes. Usa un ejemplo CSV/PDF o sube tu propio archivo.
           </div>
         ) : (
           <div className="table-wrap">
